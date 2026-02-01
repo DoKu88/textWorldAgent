@@ -2,11 +2,11 @@
 
 import random
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 import sys
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 
 class BaseAgent(ABC):
     """Abstract base agent for TextWorld."""
@@ -20,7 +20,6 @@ class BaseAgent(ABC):
         """Reset agent state for a new episode."""
         pass
 
-
 class RandomAgent(BaseAgent):
     """Agent that selects actions randomly from admissible commands."""
 
@@ -28,13 +27,23 @@ class RandomAgent(BaseAgent):
         admissible_commands = info.get("admissible_commands", ["look"])
         return random.choice(admissible_commands)
 
-
 class LLMAgent(BaseAgent):
     """Agent that uses an LLM to select actions."""
 
-    def __init__(self, model_name: str = "gpt2"):
+    def __init__(self, model_name: str = "google/flan-t5-small"):
+        self.model_name = model_name
+        print(f"Loading model: {model_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
+
+        # Use seq2seq for T5/Flan models, causal for others
+        if "t5" in model_name.lower():
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+            self.is_seq2seq = True
+            print("Using seq2seq mode")
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(model_name)
+            self.is_seq2seq = False
+            print("Using causal mode")
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -44,45 +53,80 @@ class LLMAgent(BaseAgent):
     def reset(self) -> None:
         self.history = []
 
-    def _build_prompt(self, observation: str, admissible_commands: List[str]) -> str:
-        commands_str = ", ".join(admissible_commands)
-
-        prompt = f"""You are playing a text adventure game. Based on the observation, choose the best action.
-
-Observation: {observation}
-
-Available actions: {commands_str}
-
-Your action:"""
-        return prompt
+    def _build_prompt(self, observation: str, admissible_commands: List[str]) -> Tuple[str, Dict[str, str]]:
+        # Build options dictionary first (number -> command)
+        options: Dict[str, str] = {str(i + 1): cmd for i, cmd in enumerate(admissible_commands)}
+        options_str = ", ".join(f"{k}. {v}" for k, v in options.items())
+        prompt = f"Choose an action: {options_str}"
+        return prompt, options
 
     def act(self, observation: str, score: int, done: bool, info: dict) -> str:
         admissible_commands = info.get("admissible_commands", ["look"])
 
-        prompt = self._build_prompt(observation, admissible_commands)
+        prompt, options = self._build_prompt(observation, admissible_commands)
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
 
         with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=20,
-                do_sample=True,
-                temperature=0.7,
-                pad_token_id=self.tokenizer.pad_token_id
-            )
+            if self.is_seq2seq:
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=20,
+                    do_sample=False,
+                )
+                response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            else:
+                input_length = inputs["input_ids"].shape[1]
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=20,
+                    do_sample=True,
+                    temperature=0.7,
+                    pad_token_id=self.tokenizer.pad_token_id
+                )
+                new_tokens = outputs[0][input_length:]
+                response = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        response = response[len(prompt):].strip().split("\n")[0].strip()
+        response = response.strip().split("\n")[0].strip()
 
-        # Match response to admissible commands
-        response_lower = response.lower()
-        for cmd in admissible_commands:
-            if cmd.lower() in response_lower or response_lower in cmd.lower():
-                return cmd
+        # Resolve chosen option: try number first, then fall back to word-overlap
+        chosen_num = None
+        best_cmd = None
+        best_score = -1
 
-        # If no match, raise error and exit
-        raise RuntimeError("LLM agent did not produce a valid admissible command.\n"
-                           f"Observation: {observation}\n"
-                           f"Model response: '{response}'\n"
-                           f"Admissible commands: {admissible_commands}")
-        sys.exit(1)
+        # Try to parse as a numbered choice (e.g. "1", "2.", " 3 ")
+        parts = response.strip().split()
+        if parts:
+            first = parts[0].rstrip(".")
+            if first in options:
+                chosen_num = first
+                best_cmd = options[chosen_num]
+
+        if best_cmd is None:
+            # Fallback: word overlap scoring
+            best_score = -1
+            response_words = set(response.lower().split())
+            for cmd in admissible_commands:
+                cmd_words = set(cmd.lower().split())
+                overlap = len(response_words & cmd_words)
+                if cmd.lower() == response.lower():
+                    overlap += 10
+                elif cmd.lower() in response.lower():
+                    overlap += 5
+                if overlap > best_score:
+                    best_score = overlap
+                    best_cmd = cmd
+
+        print("Options:", options)
+        if chosen_num is not None:
+            print(f"Chosen: {chosen_num} -> {best_cmd}")
+        else:
+            print(f"Chosen (via word overlap): {best_cmd}")
+
+        if best_cmd and (chosen_num is not None or best_score > 0):
+            return best_cmd
+
+        raise RuntimeError(
+            f"LLM agent did not produce a valid admissible command.\n"
+            f"Model response: '{response}'\n"
+            f"Admissible commands: {admissible_commands}"
+        )

@@ -20,8 +20,8 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt2",
-        help="Model name for LLM agent"
+        default="google/flan-t5-small",
+        help="Model name for LLM agent (default: google/flan-t5-small)"
     )
     parser.add_argument(
         "--episodes",

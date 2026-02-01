@@ -20,15 +20,14 @@ The r_0 are rooms.
 Understand "Room" as r_0.
 The internal name of r_0 is "Room".
 The printed name of r_0 is "-= Room =-".
-The Room part 0 is some text that varies. The Room part 0 is "You find yourself in a Room. An ordinary kind of place.
+The Room part 0 is some text that varies. The Room part 0 is "You find yourself in a Room. A typical one.
 
- You can see [if c_0 is locked]a locked[else if c_0 is open]an opened[otherwise]a closed[end if]".
-The Room part 1 is some text that varies. The Room part 1 is " chest, which looks normal, in the room.[if c_0 is open and there is something in the c_0] The chest contains [a list of things in the c_0].[end if]".
-The Room part 2 is some text that varies. The Room part 2 is "[if c_0 is open and the c_0 contains nothing] The chest is empty! This is the worst thing that could possibly happen, ever![end if]".
-The Room part 3 is some text that varies. The Room part 3 is "
+ You see a gleam over in a corner, where you can see a chest.[if c_0 is open and there is something in the c_0] The chest contains [a list of things in the c_0].[end if]".
+The Room part 1 is some text that varies. The Room part 1 is "[if c_0 is open and the c_0 contains nothing] Empty! What kind of nightmare TextWorld is this?[end if]".
+The Room part 2 is some text that varies. The Room part 2 is "
 
 ".
-The description of r_0 is "[Room part 0][Room part 1][Room part 2][Room part 3]".
+The description of r_0 is "[Room part 0][Room part 1][Room part 2]".
 
 
 The c_0 are containers.
@@ -38,7 +37,7 @@ The k_0 are privately-named.
 The r_0 are rooms.
 The r_0 are privately-named.
 
-The description of c_0 is "The chest looks strong, and impossible to crack. [if open]It is open.[else if closed]It is closed.[otherwise]It is locked.[end if]".
+The description of c_0 is "The chest looks strong, and impossible to crack. [if open]You can see inside it.[else if closed]You can't see inside it because the lid's in your way.[otherwise]There is a lock on it.[end if]".
 The printed name of c_0 is "chest".
 Understand "chest" as c_0.
 The c_0 is in r_0.

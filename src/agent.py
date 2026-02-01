@@ -54,16 +54,37 @@ class LLMAgent(BaseAgent):
         self.history = []
 
     def _build_prompt(self, observation: str, admissible_commands: List[str]) -> Tuple[str, Dict[str, str]]:
-        # Build options dictionary first (number -> command)
+        # Build options dictionary (number -> command)
         options: Dict[str, str] = {str(i + 1): cmd for i, cmd in enumerate(admissible_commands)}
         options_str = ", ".join(f"{k}. {v}" for k, v in options.items())
-        prompt = f"Choose an action: {options_str}"
+
+        # Clean observation: remove ASCII art and special formatting
+        lines = observation.split('\n')
+        clean_lines = []
+        for line in lines:
+            # Skip lines that look like ASCII art
+            special_chars = sum(1 for c in line if c in '$\\|_/>()[]{}')
+            if len(line) > 0 and special_chars / len(line) > 0.15:
+                continue
+            # Skip lines with $$ patterns (ASCII art)
+            if '$$' in line or '\\$' in line:
+                continue
+            # Skip lines with -= formatting
+            line = line.replace("-=", "").replace("=-", "").strip()
+            if line:
+                clean_lines.append(line)
+
+        obs_clean = " ".join(clean_lines)
+        obs_clean = " ".join(obs_clean.split())  # normalize whitespace
+
+        prompt = f"You are in a text game. {obs_clean} Choose the best action: {options_str}"
         return prompt, options
 
     def act(self, observation: str, score: int, done: bool, info: dict) -> str:
         admissible_commands = info.get("admissible_commands", ["look"])
 
         prompt, options = self._build_prompt(observation, admissible_commands)
+        print(f"\n[PROMPT]: {prompt}\n")
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
 
         with torch.no_grad():
@@ -87,6 +108,7 @@ class LLMAgent(BaseAgent):
                 response = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
         response = response.strip().split("\n")[0].strip()
+        print(f"[RAW LLM OUTPUT]: '{response}'")
 
         # Resolve chosen option: try number first, then fall back to word-overlap
         chosen_num = None

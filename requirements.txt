@@ -1,0 +1,6 @@
+# Python 3.8+ required
+textworld>=1.6.0
+torch>=2.0.0
+transformers>=4.35.0
+numpy>=1.24.0
+tqdm>=4.65.0

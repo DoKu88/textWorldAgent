@@ -1,2 +1,5 @@
 games/
 *.pyc
+.env
+__pycache__/
+data/

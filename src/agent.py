@@ -1,12 +1,18 @@
 """Base agent class for TextWorld environments with Pydantic type guarantees."""
 
+import os
 import random
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Type
 
 import torch
+from dotenv import load_dotenv
+from openai import OpenAI
 from pydantic import BaseModel, Field
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
+
+# Load environment variables from .env
+load_dotenv()
 
 # =============================================================================
 # Pydantic Models for Agent I/O
@@ -228,6 +234,145 @@ class LLMAgentTransformers(BaseAgent):
         )
 
 
+class AgentOpenAI(BaseAgent):
+    """Agent that uses the OpenAI API to select actions."""
+
+    name: str = "openai"
+
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        verbose: bool = True,
+        api_key: Optional[str] = None,
+    ):
+        self.model = model
+        self.verbose = verbose
+        self.history: List[Dict[str, str]] = []
+
+        # Get API key from parameter, env var, or .env file
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "OpenAI API key not found. Set OPENAI_API_KEY in .env or pass api_key parameter."
+            )
+
+        self.client = OpenAI(api_key=self.api_key)
+
+        if self.verbose:
+            print(f"Using OpenAI model: {model}")
+
+    def reset(self) -> None:
+        self.history = []
+
+    def _clean_observation(self, observation: str) -> str:
+        """Remove ASCII art and special formatting from observation."""
+        lines = observation.split('\n')
+        clean_lines = []
+        for line in lines:
+            special_chars = sum(1 for c in line if c in '$\\|_/>()[]{}')
+            if len(line) > 0 and special_chars / len(line) > 0.15:
+                continue
+            if '$$' in line or '\\$' in line:
+                continue
+            line = line.replace("-=", "").replace("=-", "").strip()
+            if line:
+                clean_lines.append(line)
+
+        obs_clean = " ".join(clean_lines)
+        return " ".join(obs_clean.split())
+
+    def act(self, agent_input: AgentInput) -> AgentOutput:
+        obs_clean = self._clean_observation(agent_input.observation)
+
+        # Build the prompt
+        commands_list = "\n".join(
+            f"- {cmd}" for cmd in agent_input.admissible_commands
+        )
+
+        system_prompt = """You are an expert text adventure game player. Your goal is to complete the game objectives efficiently.
+
+Rules:
+1. You MUST respond with EXACTLY one of the available commands, nothing else.
+2. Do not add any explanation or extra text.
+3. Think about what action will make progress toward the game goal."""
+
+        user_prompt = f"""Current situation: {obs_clean}
+
+Available commands:
+{commands_list}
+
+Respond with exactly one command from the list above:"""
+
+        if self.verbose:
+            print(f"\n[PROMPT]: {user_prompt}\n")
+
+        # Call OpenAI API
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_tokens=50,
+            temperature=0.0,
+        )
+
+        raw_response = response.choices[0].message.content.strip()
+
+        if self.verbose:
+            print(f"[RAW LLM OUTPUT]: '{raw_response}'")
+
+        # Match response to admissible commands
+        action = None
+
+        # Try exact match first
+        for cmd in agent_input.admissible_commands:
+            if cmd.lower() == raw_response.lower():
+                action = cmd
+                break
+
+        # Try substring match
+        if action is None:
+            for cmd in agent_input.admissible_commands:
+                if cmd.lower() in raw_response.lower():
+                    action = cmd
+                    break
+
+        # Try word overlap as last resort
+        if action is None:
+            best_cmd = None
+            best_score = 0
+            response_words = set(raw_response.lower().split())
+
+            for cmd in agent_input.admissible_commands:
+                cmd_words = set(cmd.lower().split())
+                overlap = len(response_words & cmd_words)
+                if overlap > best_score:
+                    best_score = overlap
+                    best_cmd = cmd
+
+            if best_score > 0:
+                action = best_cmd
+
+        if action is None:
+            raise RuntimeError(
+                f"OpenAI agent did not produce a valid admissible command.\n"
+                f"Model response: '{raw_response}'\n"
+                f"Admissible commands: {agent_input.admissible_commands}"
+            )
+
+        if self.verbose:
+            print(f"Chosen: {action}")
+
+        return AgentOutput(
+            action=action,
+            reasoning=raw_response,
+            confidence=None,
+        )
+
+
 # =============================================================================
 # Agent Factory
 # =============================================================================
@@ -260,3 +405,4 @@ class AgentFactory:
 AgentFactory.register("random", RandomAgent)
 AgentFactory.register("llm", LLMAgentTransformers)
 AgentFactory.register("llm-transformers", LLMAgentTransformers)
+AgentFactory.register("openai", AgentOpenAI)

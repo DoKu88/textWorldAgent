@@ -20,8 +20,8 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="google/flan-t5-small",
-        help="Model name for LLM agent (default: google/flan-t5-small)"
+        default=None,
+        help="Model name (default: google/flan-t5-small for llm, gpt-4o-mini for openai)"
     )
     parser.add_argument(
         "--episodes",
@@ -48,10 +48,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Create agent using factory
+    # Create agent using factory with agent-specific defaults
     agent_kwargs = {}
     if args.agent in ["llm", "llm-transformers"]:
-        agent_kwargs["model_name"] = args.model
+        agent_kwargs["model_name"] = args.model or "google/flan-t5-small"
+        agent_kwargs["verbose"] = not args.quiet
+    elif args.agent == "openai":
+        agent_kwargs["model"] = args.model or "gpt-4o-mini"
         agent_kwargs["verbose"] = not args.quiet
 
     agent = AgentFactory.create(args.agent, **agent_kwargs)

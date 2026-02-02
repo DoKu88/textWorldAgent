@@ -48,7 +48,8 @@ class GameRunner:
             print(self._clean_obs(obs))
 
         while not done:
-            action = self.agent.act(obs, total_score, done, info)
+            # Use __call__ for backwards compatibility with TextWorld interface
+            action = self.agent(obs, total_score, done, info)
 
             trajectory.append({
                 "observation": obs,

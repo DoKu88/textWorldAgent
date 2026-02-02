@@ -2,7 +2,7 @@
 
 import argparse
 
-from src.agent import RandomAgent, LLMAgent
+from src.agent import AgentFactory
 from src.environment import create_env
 from src.runner import GameRunner
 from src.data_collector import TrajectoryCollector
@@ -14,8 +14,8 @@ def main():
         "--agent",
         type=str,
         default="random",
-        choices=["random", "llm"],
-        help="Agent type to use"
+        choices=AgentFactory.list_agents(),
+        help=f"Agent type to use. Available: {', '.join(AgentFactory.list_agents())}"
     )
     parser.add_argument(
         "--model",
@@ -48,13 +48,14 @@ def main():
 
     args = parser.parse_args()
 
-    # Create agent
-    if args.agent == "random":
-        agent = RandomAgent()
-        print("Using Random Agent")
-    else:
-        agent = LLMAgent(model_name=args.model)
-        print(f"Using LLM Agent with model: {args.model}")
+    # Create agent using factory
+    agent_kwargs = {}
+    if args.agent in ["llm", "llm-transformers"]:
+        agent_kwargs["model_name"] = args.model
+        agent_kwargs["verbose"] = not args.quiet
+
+    agent = AgentFactory.create(args.agent, **agent_kwargs)
+    print(f"Using agent: {args.agent}")
 
     # Create environment
     print("Creating TextWorld environment...")

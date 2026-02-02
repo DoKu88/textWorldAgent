@@ -56,6 +56,9 @@ def main():
     env_cfg = env_config.get("env", {})
     info_requests_cfg = env_config.get("info_requests", {})
 
+    # Output verbosity: quiet, normal, or verbose
+    output_mode = run_cfg.get("output", "normal")
+
     # Create agent using factory
     agent_type = agent_cfg.get("type", "random")
     agent_kwargs = {
@@ -65,10 +68,10 @@ def main():
 
     if agent_type == "transformers":
         agent_kwargs["model_name"] = agent_cfg.get("model", "google/flan-t5-small")
-        agent_kwargs["verbose"] = not run_cfg.get("quiet", False)
+        agent_kwargs["verbose"] = (output_mode == "verbose")
     elif agent_type == "openai":
         agent_kwargs["model"] = agent_cfg.get("model", "gpt-4o-mini")
-        agent_kwargs["verbose"] = not run_cfg.get("quiet", False)
+        agent_kwargs["verbose"] = (output_mode == "verbose")
 
     agent = AgentFactory.create(agent_type, **agent_kwargs)
 
@@ -84,20 +87,21 @@ def main():
     )
 
     # Create runner
-    runner = GameRunner(agent, env, verbose=not run_cfg.get("quiet", False))
+    runner = GameRunner(agent, env, output_mode=output_mode)
 
-    # Print setup info
-    print(f"\n{'─'*60}")
-    print(f"  TextWorld Agent")
-    print(f"{'─'*60}")
-    print(f"  Agent: {agent_type}")
-    if agent_type in ("transformers", "openai"):
-        model_name = agent_cfg.get("model", "default")
-        print(f"  Model: {model_name}")
-    print(f"  Objective mode: {agent_cfg.get('objective_mode', 'explicit')}")
-    print(f"  Intermediate rewards: {env_cfg.get('intermediate_reward', True)}")
-    print(f"  Episodes: {run_cfg.get('episodes', 1)}")
-    print(f"{'─'*60}\n")
+    # Print setup info (unless quiet mode)
+    if output_mode != "quiet":
+        print(f"\n{'─'*60}")
+        print(f"  TextWorld Agent")
+        print(f"{'─'*60}")
+        print(f"  Agent: {agent_type}")
+        if agent_type in ("transformers", "openai"):
+            model_name = agent_cfg.get("model", "default")
+            print(f"  Model: {model_name}")
+        print(f"  Objective mode: {agent_cfg.get('objective_mode', 'explicit')}")
+        print(f"  Intermediate rewards: {env_cfg.get('intermediate_reward', True)}")
+        print(f"  Episodes: {run_cfg.get('episodes', 1)}")
+        print(f"{'─'*60}\n")
 
     # Run episodes
     episodes = run_cfg.get("episodes", 1)
@@ -112,18 +116,19 @@ def main():
         collector.save_sft_format()
         collector.save_rl_format()
 
-    # Print summary
-    scores = [r[0] for r in results]
-    steps = [r[1] for r in results]
+    # Print summary (unless quiet mode)
+    if output_mode != "quiet":
+        scores = [r[0] for r in results]
+        steps = [r[1] for r in results]
 
-    print(f"\n{'─'*60}")
-    print(f"  Summary")
-    print(f"{'─'*60}")
-    print(f"  Episodes:      {len(results)}")
-    print(f"  Average Score: {sum(scores)/len(scores):.2f}")
-    print(f"  Average Steps: {sum(steps)/len(steps):.2f}")
-    print(f"  Max Score:     {max(scores)}")
-    print(f"{'─'*60}")
+        print(f"\n{'─'*60}")
+        print(f"  Summary")
+        print(f"{'─'*60}")
+        print(f"  Episodes:      {len(results)}")
+        print(f"  Average Score: {sum(scores)/len(scores):.2f}")
+        print(f"  Average Steps: {sum(steps)/len(steps):.2f}")
+        print(f"  Max Score:     {max(scores)}")
+        print(f"{'─'*60}")
 
     env.close()
 

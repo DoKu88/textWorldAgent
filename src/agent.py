@@ -72,6 +72,125 @@ class BaseAgent(ABC):
         agent_output = self.act(agent_input)
         return agent_output.action
 
+    def _clean_observation(self, observation: str) -> str:
+        """Remove ASCII art and special formatting from observation.
+
+        Can be overridden by subclasses for custom cleaning logic.
+        """
+        lines = observation.split('\n')
+        clean_lines = []
+        for line in lines:
+            # Skip lines that look like ASCII art
+            special_chars = sum(1 for c in line if c in '$\\|_/>()[]{}')
+            if len(line) > 0 and special_chars / len(line) > 0.15:
+                continue
+            # Skip lines with $$ patterns (ASCII art)
+            if '$$' in line or '\\$' in line:
+                continue
+            # Skip lines with -= formatting
+            line = line.replace("-=", "").replace("=-", "").strip()
+            if line:
+                clean_lines.append(line)
+
+        obs_clean = " ".join(clean_lines)
+        return " ".join(obs_clean.split())  # normalize whitespace
+
+    def _parse_action(
+        self,
+        response: str,
+        options: Dict[str, str],
+        admissible_commands: List[str],
+    ) -> Optional[str]:
+        """Parse LLM response to extract chosen command.
+
+        Tries multiple strategies in order:
+        1. Numbered choice (e.g., "1", "2.")
+        2. Exact match against admissible commands
+        3. Substring match
+        4. Word overlap scoring
+
+        Args:
+            response: Raw LLM response text
+            options: Mapping of option numbers to commands (e.g., {"1": "go north"})
+            admissible_commands: List of valid commands
+
+        Returns:
+            Matched command or None if no match found
+        """
+        response = response.strip()
+
+        # Strategy 1: Try numbered choice (e.g., "1", "2.", " 3 ")
+        parts = response.split()
+        if parts:
+            first = parts[0].rstrip(".")
+            if first in options:
+                return options[first]
+
+        # Strategy 2: Exact match
+        for cmd in admissible_commands:
+            if cmd.lower() == response.lower():
+                return cmd
+
+        # Strategy 3: Substring match
+        for cmd in admissible_commands:
+            if cmd.lower() in response.lower():
+                return cmd
+
+        # Strategy 4: Word overlap scoring
+        best_cmd = None
+        best_score = 0
+        response_words = set(response.lower().split())
+
+        for cmd in admissible_commands:
+            cmd_words = set(cmd.lower().split())
+            overlap = len(response_words & cmd_words)
+            if overlap > best_score:
+                best_score = overlap
+                best_cmd = cmd
+
+        return best_cmd if best_score > 0 else None
+
+    def _build_prompt(
+        self,
+        agent_input: AgentInput,
+    ) -> tuple[str, str, Dict[str, str]]:
+        """Build standardized prompt for LLM agents.
+
+        Can be overridden by subclasses for custom prompting.
+
+        Args:
+            agent_input: The current game state
+
+        Returns:
+            Tuple of (system_prompt, user_prompt, options_dict)
+        """
+        obs_clean = self._clean_observation(agent_input.observation)
+
+        # Build options mapping
+        options: Dict[str, str] = {
+            str(i + 1): cmd for i, cmd in enumerate(agent_input.admissible_commands)
+        }
+        commands_list = "\n".join(f"{k}. {v}" for k, v in options.items())
+
+        system_prompt = (
+            "You are an expert text adventure game player. "
+            "Your goal is to complete the game objectives efficiently.\n\n"
+            "Rules:\n"
+            "1. You MUST respond with EXACTLY one of the available commands (or its number), nothing else.\n"
+            "2. Do not add any explanation or extra text.\n"
+            "3. Think about what action will make progress toward the game goal."
+        )
+
+        user_prompt = f"""Current situation: {obs_clean}
+
+Available commands:
+{commands_list}
+
+Respond with exactly one command from the list above:"""
+
+        return system_prompt, user_prompt, options
+
+
 # =============================================================================
 # Agent Implementations
 # =============================================================================
@@ -123,69 +242,14 @@ class LLMAgentTransformers(BaseAgent):
     def reset(self) -> None:
         self.history = []
 
-    def _clean_observation(self, observation: str) -> str:
-        """Remove ASCII art and special formatting from observation."""
-        lines = observation.split('\n')
-        clean_lines = []
-        for line in lines:
-            # Skip lines that look like ASCII art
-            special_chars = sum(1 for c in line if c in '$\\|_/>()[]{}')
-            if len(line) > 0 and special_chars / len(line) > 0.15:
-                continue
-            # Skip lines with $$ patterns (ASCII art)
-            if '$$' in line or '\\$' in line:
-                continue
-            # Skip lines with -= formatting
-            line = line.replace("-=", "").replace("=-", "").strip()
-            if line:
-                clean_lines.append(line)
-
-        obs_clean = " ".join(clean_lines)
-        return " ".join(obs_clean.split())  # normalize whitespace
-
-    def _build_prompt(self, agent_input: AgentInput) -> tuple[str, Dict[str, str]]:
-        """Build prompt and options mapping."""
-        options: Dict[str, str] = {
-            str(i + 1): cmd for i, cmd in enumerate(agent_input.admissible_commands)
-        }
-        options_str = ", ".join(f"{k}. {v}" for k, v in options.items())
-        obs_clean = self._clean_observation(agent_input.observation)
-
-        prompt = f"You are in a text game. {obs_clean} Choose the best action: {options_str}"
-        return prompt, options
-
-    def _parse_response(self, response: str, options: Dict[str, str], admissible_commands: List[str]) -> Optional[str]:
-        """Parse LLM response to extract chosen command."""
-        # Try to parse as a numbered choice (e.g. "1", "2.", " 3 ")
-        parts = response.strip().split()
-        if parts:
-            first = parts[0].rstrip(".")
-            if first in options:
-                return options[first]
-
-        # Fallback: word overlap scoring
-        best_cmd = None
-        best_score = -1
-        response_words = set(response.lower().split())
-
-        for cmd in admissible_commands:
-            cmd_words = set(cmd.lower().split())
-            overlap = len(response_words & cmd_words)
-            if cmd.lower() == response.lower():
-                overlap += 10
-            elif cmd.lower() in response.lower():
-                overlap += 5
-            if overlap > best_score:
-                best_score = overlap
-                best_cmd = cmd
-
-        return best_cmd if best_score > 0 else None
-
     def act(self, agent_input: AgentInput) -> AgentOutput:
-        prompt, options = self._build_prompt(agent_input)
+        system_prompt, user_prompt, options = self._build_prompt(agent_input)
+        # Combine prompts for transformer models (no chat format)
+        prompt = f"{system_prompt}\n\n{user_prompt}"
 
         if self.verbose:
-            print(f"\n[PROMPT]: {prompt}\n")
+            print(f"\n[SYSTEM]: {system_prompt}\n")
+            print(f"[USER]: {user_prompt}\n")
 
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
 
@@ -215,7 +279,7 @@ class LLMAgentTransformers(BaseAgent):
             print(f"[RAW LLM OUTPUT]: '{response}'")
             print(f"Options: {options}")
 
-        action = self._parse_response(response, options, agent_input.admissible_commands)
+        action = self._parse_action(response, options, agent_input.admissible_commands)
 
         if action is None:
             raise RuntimeError(
@@ -264,47 +328,12 @@ class AgentOpenAI(BaseAgent):
     def reset(self) -> None:
         self.history = []
 
-    def _clean_observation(self, observation: str) -> str:
-        """Remove ASCII art and special formatting from observation."""
-        lines = observation.split('\n')
-        clean_lines = []
-        for line in lines:
-            special_chars = sum(1 for c in line if c in '$\\|_/>()[]{}')
-            if len(line) > 0 and special_chars / len(line) > 0.15:
-                continue
-            if '$$' in line or '\\$' in line:
-                continue
-            line = line.replace("-=", "").replace("=-", "").strip()
-            if line:
-                clean_lines.append(line)
-
-        obs_clean = " ".join(clean_lines)
-        return " ".join(obs_clean.split())
-
     def act(self, agent_input: AgentInput) -> AgentOutput:
-        obs_clean = self._clean_observation(agent_input.observation)
-
-        # Build the prompt
-        commands_list = "\n".join(
-            f"- {cmd}" for cmd in agent_input.admissible_commands
-        )
-
-        system_prompt = """You are an expert text adventure game player. Your goal is to complete the game objectives efficiently.
-
-Rules:
-1. You MUST respond with EXACTLY one of the available commands, nothing else.
-2. Do not add any explanation or extra text.
-3. Think about what action will make progress toward the game goal."""
-
-        user_prompt = f"""Current situation: {obs_clean}
-
-Available commands:
-{commands_list}
-
-Respond with exactly one command from the list above:"""
+        system_prompt, user_prompt, options = self._build_prompt(agent_input)
 
         if self.verbose:
-            print(f"\n[PROMPT]: {user_prompt}\n")
+            print(f"\n[SYSTEM]: {system_prompt}\n")
+            print(f"[USER]: {user_prompt}\n")
 
         # Call OpenAI API
         messages = [
@@ -323,38 +352,9 @@ Respond with exactly one command from the list above:"""
 
         if self.verbose:
             print(f"[RAW LLM OUTPUT]: '{raw_response}'")
+            print(f"Options: {options}")
 
-        # Match response to admissible commands
-        action = None
-
-        # Try exact match first
-        for cmd in agent_input.admissible_commands:
-            if cmd.lower() == raw_response.lower():
-                action = cmd
-                break
-
-        # Try substring match
-        if action is None:
-            for cmd in agent_input.admissible_commands:
-                if cmd.lower() in raw_response.lower():
-                    action = cmd
-                    break
-
-        # Try word overlap as last resort
-        if action is None:
-            best_cmd = None
-            best_score = 0
-            response_words = set(raw_response.lower().split())
-
-            for cmd in agent_input.admissible_commands:
-                cmd_words = set(cmd.lower().split())
-                overlap = len(response_words & cmd_words)
-                if overlap > best_score:
-                    best_score = overlap
-                    best_cmd = cmd
-
-            if best_score > 0:
-                action = best_cmd
+        action = self._parse_action(raw_response, options, agent_input.admissible_commands)
 
         if action is None:
             raise RuntimeError(

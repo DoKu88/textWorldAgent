@@ -6,7 +6,6 @@ from typing import Optional
 import textworld
 import textworld.gym
 
-
 def make_random_game(
     seed: Optional[int] = None,
     quest_length: int = 3,

@@ -30,6 +30,10 @@ class AgentInput(BaseModel):
     inventory: Optional[str] = Field(default=None, description="Current inventory")
     max_score: Optional[int] = Field(default=None, description="Maximum possible score")
     objective: Optional[str] = Field(default=None, description="The game objective/goal")
+    intermediate_reward: Optional[float] = Field(
+        default=None,
+        description="Reward from the last action (+1 for sub-goal completion, 0 neutral, negative for bad actions)"
+    )
 
     @classmethod
     def from_textworld(
@@ -69,6 +73,7 @@ class AgentInput(BaseModel):
             inventory=info.get("inventory"),
             max_score=info.get("max_score"),
             objective=objective,
+            intermediate_reward=info.get("intermediate_reward"),
         )
 
 class AgentOutput(BaseModel):
@@ -200,6 +205,27 @@ class BaseAgent(ABC):
 
         return best_cmd if best_score > 0 else None
 
+    def _print_prompt(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        agent_input: AgentInput,
+    ) -> None:
+        """Print formatted prompt with score info."""
+        score_str = f"{agent_input.score}"
+        if agent_input.max_score:
+            score_str += f"/{agent_input.max_score}"
+
+        print(f"\n  ┌─ System ─────────────────────────────────────────────")
+        for line in system_prompt.split('\n'):
+            print(f"  │ {line}")
+        print(f"  └──────────────────────────────────────────────────────")
+
+        print(f"\n  ┌─ User (Score: {score_str}) ─────────────────────────")
+        for line in user_prompt.split('\n'):
+            print(f"  │ {line}")
+        print(f"  └──────────────────────────────────────────────────────\n")
+
     def _build_prompt(
         self,
         agent_input: AgentInput,
@@ -292,7 +318,7 @@ class TransformersAgent(BaseAgent):
         self.verbose = verbose
 
         if self.verbose:
-            print(f"Loading model: {model_name}")
+            print(f"  Loading model: {model_name}...")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -300,13 +326,9 @@ class TransformersAgent(BaseAgent):
         if "t5" in model_name.lower():
             self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
             self.is_seq2seq = True
-            if self.verbose:
-                print("Using seq2seq mode")
         else:
             self.model = AutoModelForCausalLM.from_pretrained(model_name)
             self.is_seq2seq = False
-            if self.verbose:
-                print("Using causal mode")
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -317,8 +339,7 @@ class TransformersAgent(BaseAgent):
         prompt = f"{system_prompt}\n\n{user_prompt}"
 
         if self.verbose:
-            print(f"\n[SYSTEM]: {system_prompt}\n")
-            print(f"[USER]: {user_prompt}\n")
+            self._print_prompt(system_prompt, user_prompt, agent_input)
 
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
 
@@ -344,10 +365,6 @@ class TransformersAgent(BaseAgent):
 
         response = response.strip().split("\n")[0].strip()
 
-        if self.verbose:
-            print(f"[RAW LLM OUTPUT]: '{response}'")
-            print(f"Options: {options}")
-
         action = self._parse_action(response, options, agent_input.admissible_commands)
 
         if action is None:
@@ -356,9 +373,6 @@ class TransformersAgent(BaseAgent):
                 f"Model response: '{response}'\n"
                 f"Admissible commands: {agent_input.admissible_commands}"
             )
-
-        if self.verbose:
-            print(f"Chosen: {action}")
 
         return AgentOutput(
             action=action,
@@ -394,14 +408,13 @@ class AgentOpenAI(BaseAgent):
         self.client = OpenAI(api_key=self.api_key)
 
         if self.verbose:
-            print(f"Using OpenAI model: {model}")
+            print(f"  Using OpenAI model: {model}")
 
     def act(self, agent_input: AgentInput) -> AgentOutput:
         system_prompt, user_prompt, options = self._build_prompt(agent_input)
 
         if self.verbose:
-            print(f"\n[SYSTEM]: {system_prompt}\n")
-            print(f"[USER]: {user_prompt}\n")
+            self._print_prompt(system_prompt, user_prompt, agent_input)
 
         # Call OpenAI API
         messages = [
@@ -418,10 +431,6 @@ class AgentOpenAI(BaseAgent):
 
         raw_response = response.choices[0].message.content.strip()
 
-        if self.verbose:
-            print(f"[RAW LLM OUTPUT]: '{raw_response}'")
-            print(f"Options: {options}")
-
         action = self._parse_action(raw_response, options, agent_input.admissible_commands)
 
         if action is None:
@@ -430,9 +439,6 @@ class AgentOpenAI(BaseAgent):
                 f"Model response: '{raw_response}'\n"
                 f"Admissible commands: {agent_input.admissible_commands}"
             )
-
-        if self.verbose:
-            print(f"Chosen: {action}")
 
         return AgentOutput(
             action=action,

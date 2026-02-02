@@ -39,7 +39,6 @@ def main():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
     config = load_config(config_path)
-    print(f"Loaded agent config from: {config_path}")
 
     # Load environment config
     env_config_path = Path(args.env_config)
@@ -47,7 +46,6 @@ def main():
         raise FileNotFoundError(f"Environment config file not found: {env_config_path}")
 
     env_config = load_config(env_config_path)
-    print(f"Loaded env config from: {env_config_path}")
 
     # Extract config sections
     agent_cfg = config.get("agent", {})
@@ -73,11 +71,8 @@ def main():
         agent_kwargs["verbose"] = not run_cfg.get("quiet", False)
 
     agent = AgentFactory.create(agent_type, **agent_kwargs)
-    print(f"Using agent: {agent_type}")
-    print(f"Objective mode: {agent_cfg.get('objective_mode', 'explicit')}")
 
     # Create environment
-    print("Creating TextWorld environment...")
     env = create_env(
         seed=game_cfg.get("seed"),
         quest_length=game_cfg.get("quest_length", 3),
@@ -91,9 +86,21 @@ def main():
     # Create runner
     runner = GameRunner(agent, env, verbose=not run_cfg.get("quiet", False))
 
+    # Print setup info
+    print(f"\n{'─'*60}")
+    print(f"  TextWorld Agent")
+    print(f"{'─'*60}")
+    print(f"  Agent: {agent_type}")
+    if agent_type in ("transformers", "openai"):
+        model_name = agent_cfg.get("model", "default")
+        print(f"  Model: {model_name}")
+    print(f"  Objective mode: {agent_cfg.get('objective_mode', 'explicit')}")
+    print(f"  Intermediate rewards: {env_cfg.get('intermediate_reward', True)}")
+    print(f"  Episodes: {run_cfg.get('episodes', 1)}")
+    print(f"{'─'*60}\n")
+
     # Run episodes
     episodes = run_cfg.get("episodes", 1)
-    print(f"\nRunning {episodes} episode(s)...\n")
     results = runner.run_episodes(episodes)
 
     # Collect data if requested
@@ -109,13 +116,14 @@ def main():
     scores = [r[0] for r in results]
     steps = [r[1] for r in results]
 
-    print(f"\n{'='*50}")
-    print("SUMMARY")
-    print(f"{'='*50}")
-    print(f"Episodes: {len(results)}")
-    print(f"Average Score: {sum(scores)/len(scores):.2f}")
-    print(f"Average Steps: {sum(steps)/len(steps):.2f}")
-    print(f"Max Score: {max(scores)}")
+    print(f"\n{'─'*60}")
+    print(f"  Summary")
+    print(f"{'─'*60}")
+    print(f"  Episodes:      {len(results)}")
+    print(f"  Average Score: {sum(scores)/len(scores):.2f}")
+    print(f"  Average Steps: {sum(steps)/len(steps):.2f}")
+    print(f"  Max Score:     {max(scores)}")
+    print(f"{'─'*60}")
 
     env.close()
 

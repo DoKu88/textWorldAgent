@@ -41,33 +41,47 @@ class GameRunner:
         steps = 0
         trajectory = []
 
+        max_score = info.get("max_score", "?")
+
         if self.verbose:
-            print(f"{'='*50}")
-            print("GAME START")
-            print(f"{'='*50}")
-            print(self._clean_obs(obs))
+            print(f"{'─'*60}")
+            print(f"  Game Start")
+            print(f"{'─'*60}")
+            print(f"\n{self._clean_obs(obs)}\n")
 
         while not done:
             # Use __call__ for backwards compatibility with TextWorld interface
             action = self.agent(obs, total_score, done, info)
 
-            trajectory.append({
-                "observation": obs,
-                "action": action,
-                "info": info.copy(),
-                "score": total_score
-            })
+            # Store pre-action state for trajectory
+            pre_action_obs = obs
+            pre_action_info = info.copy()
+            pre_action_score = total_score
 
             if self.verbose:
-                print(f"> {action}")
+                print(f"  > {action}")
 
             obs, score, done, info = self.env.step(action)
             total_score = score
             steps += 1
 
+            # Extract intermediate reward (step-wise reward for the action taken)
+            # This is the reward RESULTING from the action, returned by TextWorld
+            intermediate_reward = info.get("intermediate_reward", 0)
+
+            # Record transition: (state, action) -> reward
+            trajectory.append({
+                "observation": pre_action_obs,  # observation agent used to decide
+                "action": action,
+                "info": pre_action_info,  # info available when making decision
+                "score": pre_action_score,  # score before action
+                "intermediate_reward": intermediate_reward,  # reward from this action
+            })
+
             if self.verbose:
-                print(self._clean_obs(obs))
-                print(f"Score: {total_score}  |  Steps: {steps}\n")
+                print(f"\n{self._clean_obs(obs)}")
+                reward_str = f"+{intermediate_reward}" if intermediate_reward >= 0 else str(intermediate_reward)
+                print(f"  [Score: {total_score}/{max_score} | Step: {steps} | Reward: {reward_str}]\n")
 
         # Record final state
         trajectory.append({
@@ -79,11 +93,10 @@ class GameRunner:
         })
 
         if self.verbose:
-            print(f"{'='*50}")
-            result = "YOU WON!" if info.get("won", False) else "GAME OVER"
-            print(f"{result}")
-            print(f"Score: {total_score}  |  Steps: {steps}")
-            print(f"{'='*50}")
+            print(f"{'─'*60}")
+            result = "Victory!" if info.get("won", False) else "Game Over"
+            print(f"  {result}  |  Score: {total_score}/{max_score}  |  Steps: {steps}")
+            print(f"{'─'*60}")
 
         return total_score, steps, trajectory
 

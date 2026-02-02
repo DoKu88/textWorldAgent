@@ -44,25 +44,31 @@ class TrajectoryCollector:
         print(f"Saved SFT data to {filepath}")
 
     def save_rl_format(self, filename: str = "rl_data.jsonl") -> None:
-        """Save trajectories in RL format (with rewards)."""
+        """Save trajectories in RL format (with intermediate rewards).
+
+        Uses TextWorld's intermediate_reward signal which provides:
+        - Positive reward for sub-goal completion (good actions)
+        - Zero for neutral actions
+        - Negative reward for bad actions (if game defines penalties)
+        """
 
         filepath = self.output_dir / filename
 
         with open(filepath, "w") as f:
             for traj in self.trajectories:
-                prev_score = 0
                 for step in traj:
                     if step.get("action") is None:
                         continue
 
-                    reward = step["score"] - prev_score
-                    prev_score = step["score"]
+                    # Use TextWorld's intermediate_reward (step-wise reward signal)
+                    # This is the reward that resulted from taking the action
+                    intermediate_reward = step.get("intermediate_reward", 0)
 
                     record = {
                         "observation": step["observation"],
                         "action": step["action"],
                         "admissible_commands": step["info"].get("admissible_commands", []),
-                        "reward": reward,
+                        "intermediate_reward": intermediate_reward,
                         "score": step["score"]
                     }
                     f.write(json.dumps(record) + "\n")

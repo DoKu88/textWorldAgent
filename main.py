@@ -45,11 +45,41 @@ def main():
         action="store_true",
         help="Suppress verbose output"
     )
+    parser.add_argument(
+        "--history-length",
+        type=int,
+        default=0,
+        help="Number of previous observations/actions to include in prompt (default: 0)"
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for game generation (for reproducibility)"
+    )
+    parser.add_argument(
+        "--quest-length",
+        type=int,
+        default=3,
+        help="Number of actions required to complete the quest (default: 3)"
+    )
+    parser.add_argument(
+        "--nb-rooms",
+        type=int,
+        default=3,
+        help="Number of rooms in the game world (default: 3)"
+    )
+    parser.add_argument(
+        "--nb-objects",
+        type=int,
+        default=5,
+        help="Number of objects in the game world (default: 5)"
+    )
 
     args = parser.parse_args()
 
     # Create agent using factory with agent-specific defaults
-    agent_kwargs = {}
+    agent_kwargs = {"history_length": args.history_length}
     if args.agent in ["llm", "llm-transformers"]:
         agent_kwargs["model_name"] = args.model or "google/flan-t5-small"
         agent_kwargs["verbose"] = not args.quiet
@@ -62,7 +92,13 @@ def main():
 
     # Create environment
     print("Creating TextWorld environment...")
-    env = create_env(max_episode_steps=args.max_steps)
+    env = create_env(
+        seed=args.seed,
+        quest_length=args.quest_length,
+        nb_rooms=args.nb_rooms,
+        nb_objects=args.nb_objects,
+        max_episode_steps=args.max_steps,
+    )
 
     # Create runner
     runner = GameRunner(agent, env, verbose=not args.quiet)

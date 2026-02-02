@@ -29,6 +29,7 @@ class AgentInput(BaseModel):
     )
     inventory: Optional[str] = Field(default=None, description="Current inventory")
     max_score: Optional[int] = Field(default=None, description="Maximum possible score")
+    objective: Optional[str] = Field(default=None, description="The game objective/goal")
 
     @classmethod
     def from_textworld(cls, observation: str, score: int, done: bool, info: dict) -> "AgentInput":
@@ -40,6 +41,7 @@ class AgentInput(BaseModel):
             admissible_commands=info.get("admissible_commands", ["look"]),
             inventory=info.get("inventory"),
             max_score=info.get("max_score"),
+            objective=info.get("objective"),
         )
 
 class AgentOutput(BaseModel):
@@ -57,6 +59,15 @@ class BaseAgent(ABC):
 
     name: str = "base"
 
+    def __init__(self, history_length: int) -> None:
+        """Initialize agent with history tracking.
+
+        Args:
+            history_length: Number of previous (observation, action) pairs to include in prompts.
+        """
+        self.history_length = history_length
+        self._history: List[tuple[str, str]] = []
+
     @abstractmethod
     def act(self, agent_input: AgentInput) -> AgentOutput:
         """Select an action given the current game state."""
@@ -64,12 +75,17 @@ class BaseAgent(ABC):
 
     def reset(self) -> None:
         """Reset agent state for a new episode."""
-        pass
+        self._history = []
+
+    def _record_history(self, observation: str, action: str) -> None:
+        """Record an observation-action pair to history."""
+        self._history.append((observation, action))
 
     def __call__(self, observation: str, score: int, done: bool, info: dict) -> str:
         """Convenience method for direct TextWorld integration."""
         agent_input = AgentInput.from_textworld(observation, score, done, info)
         agent_output = self.act(agent_input)
+        self._record_history(observation, agent_output.action)
         return agent_output.action
 
     def _clean_observation(self, observation: str) -> str:
@@ -172,16 +188,30 @@ class BaseAgent(ABC):
         }
         commands_list = "\n".join(f"{k}. {v}" for k, v in options.items())
 
+        objective_text = ""
+        if agent_input.objective:
+            objective_text = f"\n\nYour objective: {agent_input.objective}"
+
         system_prompt = (
-            "You are an expert text adventure game player. "
-            "Your goal is to complete the game objectives efficiently.\n\n"
+            "You are an expert text adventure game player."
+            f"{objective_text}\n\n"
             "Rules:\n"
             "1. You MUST respond with EXACTLY one of the available commands (or its number), nothing else.\n"
             "2. Do not add any explanation or extra text.\n"
             "3. Think about what action will make progress toward the game goal."
         )
 
-        user_prompt = f"""Current situation: {obs_clean}
+        # Build history section
+        history_section = ""
+        if self.history_length > 0 and self._history:
+            recent_history = self._history[-self.history_length:]
+            history_lines = []
+            for obs, action in recent_history:
+                clean_obs = self._clean_observation(obs)
+                history_lines.append(f"Observation: {clean_obs}\nAction: {action}")
+            history_section = "Recent history:\n" + "\n---\n".join(history_lines) + "\n\n"
+
+        user_prompt = f"""{history_section}Current situation: {obs_clean}
 
 Available commands:
 {commands_list}
@@ -200,6 +230,9 @@ class RandomAgent(BaseAgent):
 
     name: str = "random"
 
+    def __init__(self, history_length: int) -> None:
+        super().__init__(history_length)
+
     def act(self, agent_input: AgentInput) -> AgentOutput:
         action = random.choice(agent_input.admissible_commands)
         return AgentOutput(
@@ -208,16 +241,20 @@ class RandomAgent(BaseAgent):
             confidence=1.0 / len(agent_input.admissible_commands)
         )
 
-
 class LLMAgentTransformers(BaseAgent):
     """Agent that uses a local HuggingFace Transformers LLM to select actions."""
 
     name: str = "llm-transformers"
 
-    def __init__(self, model_name: str = "google/flan-t5-small", verbose: bool = True):
+    def __init__(
+        self,
+        history_length: int,
+        model_name: str = "google/flan-t5-small",
+        verbose: bool = True,
+    ) -> None:
+        super().__init__(history_length)
         self.model_name = model_name
         self.verbose = verbose
-        self.history: List[str] = []
 
         if self.verbose:
             print(f"Loading model: {model_name}")
@@ -238,9 +275,6 @@ class LLMAgentTransformers(BaseAgent):
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-
-    def reset(self) -> None:
-        self.history = []
 
     def act(self, agent_input: AgentInput) -> AgentOutput:
         system_prompt, user_prompt, options = self._build_prompt(agent_input)
@@ -305,13 +339,14 @@ class AgentOpenAI(BaseAgent):
 
     def __init__(
         self,
+        history_length: int,
         model: str = "gpt-4o-mini",
         verbose: bool = True,
         api_key: Optional[str] = None,
-    ):
+    ) -> None:
+        super().__init__(history_length)
         self.model = model
         self.verbose = verbose
-        self.history: List[Dict[str, str]] = []
 
         # Get API key from parameter, env var, or .env file
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
@@ -324,9 +359,6 @@ class AgentOpenAI(BaseAgent):
 
         if self.verbose:
             print(f"Using OpenAI model: {model}")
-
-    def reset(self) -> None:
-        self.history = []
 
     def act(self, agent_input: AgentInput) -> AgentOutput:
         system_prompt, user_prompt, options = self._build_prompt(agent_input)
@@ -371,7 +403,6 @@ class AgentOpenAI(BaseAgent):
             reasoning=raw_response,
             confidence=None,
         )
-
 
 # =============================================================================
 # Agent Factory

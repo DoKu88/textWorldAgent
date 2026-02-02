@@ -7,6 +7,6 @@ agent:
 
 # Execution
 run:
-  episodes: 1                 # Number of episodes to run
+  episodes: 10                 # Number of episodes to run
   collect_data: false         # Collect trajectory data for training
-  output: normal              # quiet (no output), normal (clean), or verbose (full prompts)
+  output: quiet              # quiet (no output), normal (clean), or verbose (full prompts)

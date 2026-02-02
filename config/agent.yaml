@@ -2,19 +2,11 @@
 agent:
   type: openai                # Agent type: random, transformers, openai
   model: gpt-4o-mini          # Model name (for transformers/openai agents)
-  history_length: 0           # Number of previous observations/actions to include in prompt
+  history_length: 3           # Number of previous observations/actions to include in prompt
   objective_mode: abstract    # How much objective info: explicit, abstract, none
-
-# Game Generation
-game:
-  seed: null                  # Random seed for reproducibility (null = random)
-  quest_length: 3             # Number of actions required to complete quest
-  nb_rooms: 3                 # Number of rooms in game world
-  nb_objects: 5               # Number of objects in game world
 
 # Execution
 run:
   episodes: 1                 # Number of episodes to run
-  max_steps: 5               # Maximum steps per episode
   collect_data: false         # Collect trajectory data for training
   quiet: false                # Suppress verbose output

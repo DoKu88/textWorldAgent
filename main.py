@@ -23,22 +23,40 @@ def main():
         "--config",
         type=str,
         default="config/agent.yaml",
-        help="Path to YAML config file (default: config/agent.yaml)"
+        help="Path to agent YAML config file (default: config/agent.yaml)"
+    )
+    parser.add_argument(
+        "--env-config",
+        type=str,
+        default="config/env.yaml",
+        help="Path to environment YAML config file (default: config/env.yaml)"
     )
     args = parser.parse_args()
 
-    # Load config
+    # Load agent config
     config_path = Path(args.config)
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
     config = load_config(config_path)
-    print(f"Loaded config from: {config_path}")
+    print(f"Loaded agent config from: {config_path}")
+
+    # Load environment config
+    env_config_path = Path(args.env_config)
+    if not env_config_path.exists():
+        raise FileNotFoundError(f"Environment config file not found: {env_config_path}")
+
+    env_config = load_config(env_config_path)
+    print(f"Loaded env config from: {env_config_path}")
 
     # Extract config sections
     agent_cfg = config.get("agent", {})
-    game_cfg = config.get("game", {})
     run_cfg = config.get("run", {})
+
+    # Extract environment config sections
+    game_cfg = env_config.get("game", {})
+    env_cfg = env_config.get("env", {})
+    info_requests_cfg = env_config.get("info_requests", {})
 
     # Create agent using factory
     agent_type = agent_cfg.get("type", "random")
@@ -65,7 +83,9 @@ def main():
         quest_length=game_cfg.get("quest_length", 3),
         nb_rooms=game_cfg.get("nb_rooms", 3),
         nb_objects=game_cfg.get("nb_objects", 5),
-        max_episode_steps=run_cfg.get("max_steps", 50),
+        max_episode_steps=env_cfg.get("max_episode_steps", 100),
+        intermediate_reward=env_cfg.get("intermediate_reward", True),
+        info_requests=info_requests_cfg,
     )
 
     # Create runner

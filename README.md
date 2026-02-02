@@ -1,6 +1,6 @@
 # TextWorld AI Agent
 
-A boilerplate for training AI agents on TextWorld environments using SFT, RL, and DPO.
+A boilerplate for running AI agents on TextWorld environments. Training WIP
 
 ## Setup
 

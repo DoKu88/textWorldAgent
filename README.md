@@ -17,9 +17,9 @@ pip install -r requirements.txt
 python main.py --agent random
 ```
 
-### Run with LLM Agent
+### Run with Transformers Agent
 ```bash
-python main.py --agent llm
+python main.py --agent transformers
 ```
 
 ### Collect Training Data
@@ -28,8 +28,8 @@ python main.py --agent random --episodes 100 --collect-data --quiet
 ```
 
 ### Options
-- `--agent`: Agent type (`random` or `llm`)
-- `--model`: Model name for LLM agent (default: `google/flan-t5-small`)
+- `--agent`: Agent type (`random`, `transformers`, or `openai`)
+- `--model`: Model name for transformers/openai agents (default: `google/flan-t5-small`)
 - `--episodes`: Number of episodes to run
 - `--max-steps`: Maximum steps per episode
 - `--collect-data`: Save trajectories for training

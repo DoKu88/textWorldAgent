@@ -32,8 +32,35 @@ class AgentInput(BaseModel):
     objective: Optional[str] = Field(default=None, description="The game objective/goal")
 
     @classmethod
-    def from_textworld(cls, observation: str, score: int, done: bool, info: dict) -> "AgentInput":
-        """Factory method to create AgentInput from TextWorld env output."""
+    def from_textworld(
+        cls,
+        observation: str,
+        score: int,
+        done: bool,
+        info: dict,
+        objective_mode: str = "explicit",
+    ) -> "AgentInput":
+        """Factory method to create AgentInput from TextWorld env output.
+
+        Args:
+            observation: Current game observation text.
+            score: Current game score.
+            done: Whether the game has ended.
+            info: TextWorld info dict containing game state.
+            objective_mode: How to present the objective to the agent.
+                - "explicit": Full step-by-step objective from TextWorld (default)
+                - "abstract": Vague goal that requires reasoning
+                - "none": No objective provided
+        """
+        raw_objective = info.get("objective")
+
+        if objective_mode == "none":
+            objective = None
+        elif objective_mode == "abstract":
+            objective = "Explore the environment and complete your quest."
+        else:  # explicit
+            objective = raw_objective
+
         return cls(
             observation=observation,
             score=score,
@@ -41,7 +68,7 @@ class AgentInput(BaseModel):
             admissible_commands=info.get("admissible_commands", ["look"]),
             inventory=info.get("inventory"),
             max_score=info.get("max_score"),
-            objective=info.get("objective"),
+            objective=objective,
         )
 
 class AgentOutput(BaseModel):
@@ -59,13 +86,18 @@ class BaseAgent(ABC):
 
     name: str = "base"
 
-    def __init__(self, history_length: int) -> None:
+    def __init__(self, history_length: int, objective_mode: str = "explicit") -> None:
         """Initialize agent with history tracking.
 
         Args:
             history_length: Number of previous (observation, action) pairs to include in prompts.
+            objective_mode: How to present the objective to the agent.
+                - "explicit": Full step-by-step objective from TextWorld (default)
+                - "abstract": Vague goal that requires reasoning
+                - "none": No objective provided
         """
         self.history_length = history_length
+        self.objective_mode = objective_mode
         self._history: List[tuple[str, str]] = []
 
     @abstractmethod
@@ -83,7 +115,9 @@ class BaseAgent(ABC):
 
     def __call__(self, observation: str, score: int, done: bool, info: dict) -> str:
         """Convenience method for direct TextWorld integration."""
-        agent_input = AgentInput.from_textworld(observation, score, done, info)
+        agent_input = AgentInput.from_textworld(
+            observation, score, done, info, objective_mode=self.objective_mode
+        )
         agent_output = self.act(agent_input)
         self._record_history(observation, agent_output.action)
         return agent_output.action
@@ -230,8 +264,8 @@ class RandomAgent(BaseAgent):
 
     name: str = "random"
 
-    def __init__(self, history_length: int) -> None:
-        super().__init__(history_length)
+    def __init__(self, history_length: int, objective_mode: str = "explicit") -> None:
+        super().__init__(history_length, objective_mode)
 
     def act(self, agent_input: AgentInput) -> AgentOutput:
         action = random.choice(agent_input.admissible_commands)
@@ -241,18 +275,19 @@ class RandomAgent(BaseAgent):
             confidence=1.0 / len(agent_input.admissible_commands)
         )
 
-class LLMAgentTransformers(BaseAgent):
-    """Agent that uses a local HuggingFace Transformers LLM to select actions."""
+class TransformersAgent(BaseAgent):
+    """Agent that uses a local HuggingFace Transformers model to select actions."""
 
-    name: str = "llm-transformers"
+    name: str = "transformers"
 
     def __init__(
         self,
         history_length: int,
         model_name: str = "google/flan-t5-small",
         verbose: bool = True,
+        objective_mode: str = "explicit",
     ) -> None:
-        super().__init__(history_length)
+        super().__init__(history_length, objective_mode)
         self.model_name = model_name
         self.verbose = verbose
 
@@ -343,8 +378,9 @@ class AgentOpenAI(BaseAgent):
         model: str = "gpt-4o-mini",
         verbose: bool = True,
         api_key: Optional[str] = None,
+        objective_mode: str = "explicit",
     ) -> None:
-        super().__init__(history_length)
+        super().__init__(history_length, objective_mode)
         self.model = model
         self.verbose = verbose
 
@@ -434,6 +470,5 @@ class AgentFactory:
 
 # Register built-in agents
 AgentFactory.register("random", RandomAgent)
-AgentFactory.register("llm", LLMAgentTransformers)
-AgentFactory.register("llm-transformers", LLMAgentTransformers)
+AgentFactory.register("transformers", TransformersAgent)
 AgentFactory.register("openai", AgentOpenAI)
